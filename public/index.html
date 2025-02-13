@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Whiteboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .header {
+            background-color: #333;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .toolbar {
+            background-color: #fff;
+            padding: 1rem;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .tool-btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .tool-btn:hover {
+            background-color: #45a049;
+        }
+
+        .color-picker {
+            width: 50px;
+            height: 35px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .size-slider {
+            width: 100px;
+        }
+
+        .canvas-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        #whiteboard {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .status {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            background-color: #333;
+            color: white;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .online {
+            color: #4CAF50;
+        }
+
+        .offline {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Collaborative Whiteboard</h1>
+    </div>
+
+    <div class="toolbar">
+        <button class="tool-btn" id="pencil">✏️ Pencil</button>
+        <button class="tool-btn" id="eraser">🧹 Eraser</button>
+        <input type="color" id="colorPicker" class="color-picker" value="#000000">
+        <input type="range" id="sizeSlider" class="size-slider" min="1" max="20" value="5">
+        <button class="tool-btn" id="clear">🗑️ Clear</button>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="whiteboard"></canvas>
+    </div>
+
+    <div class="status">
+        Users Online: <span id="userCount" class="online">1</span>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const colorPicker = document.getElementById('colorPicker');
+        const sizeSlider = document.getElementById('sizeSlider');
+        const userCount = document.getElementById('userCount');
+
+        // Set canvas size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 0.8;
+            canvas.height = window.innerHeight * 0.7;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Drawing state
+        let isDrawing = false;
+        let currentTool = 'pencil';
+        let lastX = 0;
+        let lastY = 0;
+
+        // Connect to WebSocket server
+        // Connect to the server using the current hostname
+const socket = io(window.location.hostname + ':3000', {
+    transports: ['websocket'],
+    cors: {
+        origin: "*"
+    }
+});
+
+        // WebSocket event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+
+        socket.on('draw', data => {
+            drawLine(
+                data.x0,
+                data.y0,
+                data.x1,
+                data.y1,
+                data.color,
+                data.size,
+                data.tool
+            );
+        });
+
+        socket.on('clear', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        socket.on('userCount', count => {
+            userCount.textContent = count;
+        });
+
+        // Drawing functions
+        function drawLine(x0, y0, x1, y1, color, size, tool) {
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.strokeStyle = tool === 'eraser' ? '#FFFFFF' : color;
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.closePath();
+        }
+
+        // Event listeners
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        function startDrawing(e) {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+
+            const currentX = e.offsetX;
+            const currentY = e.offsetY;
+            const color = colorPicker.value;
+            const size = sizeSlider.value;
+
+            drawLine(lastX, lastY, currentX, currentY, color, size, currentTool);
+
+            // Emit drawing data
+            socket.emit('draw', {
+                x0: lastX,
+                y0: lastY,
+                x1: currentX,
+                y1: currentY,
+                color: color,
+                size: size,
+                tool: currentTool
+            });
+
+            [lastX, lastY] = [currentX, currentY];
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        // Tool selection
+        document.getElementById('pencil').addEventListener('click', () => {
+            currentTool = 'pencil';
+        });
+
+        document.getElementById('eraser').addEventListener('click', () => {
+            currentTool = 'eraser';
+        });
+
+        document.getElementById('clear').addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            socket.emit('clear');
+        });
+    </script>
+</body>
+</html>
